@@ -1,0 +1,5 @@
+# Second teacher family: Qwen2.5-7B-Instruct (same-tokenizer student: Qwen/Qwen2.5-0.5B-Instruct).
+base: base.yaml
+teacher: Qwen/Qwen2.5-7B-Instruct
+teacher_tag: qwen25-7b-it
+datasets: [pubmedqa]

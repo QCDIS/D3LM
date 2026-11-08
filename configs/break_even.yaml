@@ -1,0 +1,19 @@
+# Inputs for break_even.py. Use the same serving setting for every option.
+baseline: teacher
+setting: {rate: 4}                  # vLLM request rate; or {offline: true}; or {batch_size: 8} for HF benchmarks
+requests_per_day: [10000, 100000, 1000000]
+options:
+  - name: teacher
+    bench: bench/teacher_vllm.json
+  - name: teacher_awq_int4
+    bench: bench/teacher_awq_vllm.json
+  - name: d3lm_L3
+    bench: bench/d3lm_L3_vllm.json
+    datagen: {manifest: data/teacher/llama31-8b-it/manifest.json, keys: [pubmedqa_train, pubmedqa_validation]}
+    search: [runs/depth_L1/summary.json, runs/depth_L2/summary.json, runs/depth_L3/summary.json,
+             runs/depth_L4/summary.json, runs/depth_L6/summary.json]
+    train: runs/d3lm_L3/summary.json
+  - name: llama32_1b_kd
+    bench: bench/sibling_kd_vllm.json
+    datagen: {manifest: data/teacher/llama31-8b-it/manifest.json, keys: [pubmedqa_train, pubmedqa_validation]}
+    train: runs/sibling1b_kd/summary.json

@@ -1,0 +1,12 @@
+# Current best setup: student built from 7 of the teacher's 32 layers (fits a 48 GB GPU).
+# Base configuration for hparam_sweep.py.
+base: pubmedqa_llama.yaml
+student:
+  init: teacher_layers
+  num_layers: 7
+  layer_ids: null                # evenly spaced: [0, 5, 10, 16, 21, 26, 31]
+  freeze: [embeddings, lm_head]
+train:
+  lr: 5.0e-5
+  optimizer: adamw_8bit
+  gradient_checkpointing: true

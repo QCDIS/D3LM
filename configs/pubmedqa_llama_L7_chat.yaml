@@ -1,0 +1,7 @@
+# 7-layer student trained on teacher answers generated WITH the teacher's chat template
+# (the teacher then answers in the requested format and stops by itself); unfinished answers are dropped.
+base: pubmedqa_llama_L7.yaml
+teacher_tag: llama31-8b-it-chat
+teacher_chat_template: true
+train:
+  drop_truncated: true

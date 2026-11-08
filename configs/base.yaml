@@ -1,0 +1,43 @@
+# Shared settings. Experiment configs start with `base: base.yaml` and override what differs.
+# Any value can also be overridden on the command line:  --set student.num_layers=4 train.lr=2e-5
+
+teacher: meta-llama/Llama-3.1-8B-Instruct
+teacher_precision: bf16          # bf16 | fp16 | fp32 | int8 | nf4
+datasets: [pubmedqa]             # wikitext2 | squad | pubmedqa | sciq | jsonl:/path/to/own.jsonl
+splits_dir: data/splits
+targets_dir: data/teacher
+train_size: 20000
+val_size: 500
+test_size: 1000                  # PubMedQA PQA-L has exactly 1,000 labelled items
+max_prompt_tokens: 512
+max_new_tokens: 128
+output_dir: runs
+seed: 1
+
+student:
+  init: teacher_layers                   # random (D3LM) | teacher_layers (pruned teacher) | pretrained
+  num_layers: 10
+  layer_ids: null                # teacher_layers only, e.g. [0, 8, 16, 24, 31]; default: evenly spaced
+  pretrained: null               # pretrained only, e.g. meta-llama/Llama-3.2-1B-Instruct
+  freeze: [embeddings, lm_head]  # copied from the teacher and kept --> fixed reeze: [embeddings, lm_head]
+
+train:
+  objective: kd                  # kd | sft (same loop, KD term removed)
+  targets: teacher               # teacher | gold
+  ce_weight: 0.2                 # loss = (1 - ce_weight) * KD + ce_weight * CE
+  temperature: 2.0
+  divergence: fkl                # fkl (forward KL) | rkl (reverse KL)
+  lr: 3.0e-5                     # use ~2e-5 for pretrained students
+  batch_size: 4
+  grad_accum: 8                  # 32 sequences per optimizer step
+  max_steps: 1500
+  warmup_ratio: 0.03
+  max_grad_norm: 1.0
+  eval_every: 100
+  patience: 5
+  bf16: true
+  train_limit: null              # e.g. 1000 for data-size sweeps
+
+energy:
+  enabled: true
+  idle_seconds: 20

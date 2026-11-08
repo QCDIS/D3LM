@@ -1,0 +1,6 @@
+# Corrected re-run of the eScience setting (WikiText-2 + SQuAD).
+base: base.yaml
+teacher: meta-llama/Llama-3.1-8B-Instruct
+teacher_tag: llama31-8b-it
+datasets: [wikitext2, squad]
+max_prompt_tokens: 384

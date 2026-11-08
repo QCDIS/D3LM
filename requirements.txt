@@ -1,0 +1,16 @@
+torch            # must match your driver: e.g. pip install torch --index-url https://download.pytorch.org/whl/cu128
+transformers>=4.45
+datasets>=2.20
+pyyaml
+numpy
+pandas
+matplotlib
+sacrebleu
+rouge_score
+nvidia-ml-py     # pynvml, GPU energy counter
+bitsandbytes     # int8 / nf4 teacher baselines
+vllm             # serving benchmark and fast teacher generation (optional)
+sentence-transformers 
+bert-score
+openai 
+google-genai

@@ -1,0 +1,7 @@
+# Main experiment: PubMedQA, Llama-3.1-8B-Instruct teacher.
+base: base.yaml
+teacher: meta-llama/Llama-3.1-8B-Instruct
+teacher_tag: llama31-8b-it
+datasets: [pubmedqa]
+
+

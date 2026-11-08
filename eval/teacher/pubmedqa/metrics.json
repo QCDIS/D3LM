@@ -1,0 +1,29 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "precision": "bf16",
+  "n": 1000,
+  "reference": null,
+  "decoding": {
+    "greedy": true,
+    "max_new_tokens": 128
+  },
+  "generation_energy": {
+    "seconds": 381.6177483149995,
+    "mode": "counter",
+    "energy_j": 109482.423,
+    "kwh": 0.030411784166666664
+  },
+  "acc": {
+    "mean": 0.756,
+    "lo": 0.73,
+    "hi": 0.78,
+    "n": 1000
+  },
+  "macro_f1": 0.554624403216659,
+  "failure": {
+    "empty_rate": 0.0,
+    "stop_rate": 0.0,
+    "degenerate_rate": 0.004,
+    "mean_new_tokens": 128.0
+  }
+}

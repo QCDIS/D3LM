@@ -1,0 +1,10 @@
+base: pubmedqa_llama.yaml
+student:
+  init: teacher_layers
+  num_layers: 7
+  layer_ids: null                # evenly spaced: [0, 3, 7, 10, 14, 17, 21, 24, 28, 31]
+  freeze: [embeddings, lm_head]
+train:
+  lr: 4.0e-4
+  optimizer: adamw_8bit
+  gradient_checkpointing: true
