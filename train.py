@@ -193,9 +193,15 @@ def main():
     # KD teacher on the GPU. Students are built from float weights, so an int8/nf4 teacher (or SFT,
     # which never runs the teacher) uses a temporary bf16 copy on the CPU for building only.
     teacher = load_model(cfg["teacher"], cfg["teacher_precision"], dev) if kd else None
+    # the student is built from `student.source` (another model to prune) or, by default, the teacher
+    source = cfg["student"].get("source") or cfg["teacher"]
+    if source != cfg["teacher"]:
+        teacher_tok = load_tokenizer(source)
+        if kd and teacher_tok.get_vocab() != load_tokenizer(cfg["teacher"]).get_vocab():
+            raise ValueError("student.source and teacher tokenizers differ: use train.objective=sft")
     build_teacher = None
     if needs_weights:
-        build_teacher = teacher if (kd and plain) else load_model(cfg["teacher"], "bf16", "cpu")
+        build_teacher = teacher if (kd and plain and source == cfg["teacher"]) else load_model(source, "bf16", "cpu")
     if teacher is not None:
         teacher.requires_grad_(False)
     for L in (args.layers or [cfg["student"]["num_layers"]]):

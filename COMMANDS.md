@@ -314,41 +314,13 @@ python chat.py                                    # best student (runs/ce0.3_L7/
 python chat.py --model meta-llama/Llama-3.1-8B-Instruct --chat-template   # teacher, for comparison
 ```
 
-## 12. Student screening: published small models as students
+## 12. Student screening
 
-Every student learns from the same teacher answers. SFT on teacher answers works for any tokenizer;
-logit KD only for models with the teacher's tokenizer (Llama-3.2). Each model is fully fine-tuned
-(`student.freeze=[]`, lr 2e-5 as for any pretrained model), with 8-bit AdamW and gradient checkpointing.
-Llama and Gemma are gated: accept their licences on Hugging Face first.
-Memory: KD keeps the bf16 teacher (16 GB) on the GPU next to the fp32 student. Llama-3.2-1B fits; Llama-3.2-3B
-(~32 GB for weights + grads + optimizer) probably does not. If it fails with out-of-memory, rerun that one with
-`teacher_precision=int8` added, and report that the 3B KD used an int8 teacher.
+Same KD + CE training as the main student. Small models: all layers, fp32. 8B models: pruned to 7 layers,
+current settings. Non-Llama models use another tokenizer, so they train on CE only (same teacher answers).
 
 ```bash
-STUDENTS="meta-llama/Llama-3.2-1B-Instruct meta-llama/Llama-3.2-3B-Instruct Qwen/Qwen2.5-1.5B-Instruct
-          google/gemma-3-1b-it HuggingFaceTB/SmolLM2-1.7B-Instruct ibm-granite/granite-3.3-2b-instruct"
-set -f        # keep [] literal
-P="student.init=pretrained student.freeze=[] train.lr=2e-5 train.optimizer=adamw_8bit train.gradient_checkpointing=true"
-
-for m in $STUDENTS; do
-  n=$(basename $m)
-  # zero-shot (before training)
-  [ -f eval/zs_$n/pubmedqa/metrics.json ] || \
-    python evaluate.py --config $CFG --name zs_$n --model $m --chat-template --reference teacher_chat
-  # SFT on teacher answers (all models)
-  [ -f eval/sft_$n/pubmedqa/metrics.json ] || {
-    python train.py --config $CFG --set run_name=sft_$n student.pretrained=$m $P train.objective=sft train.targets=teacher
-    python evaluate.py --config $CFG --name sft_$n --model runs/sft_$n/best --reference teacher_chat; }
-done
-
-# logit KD (same tokenizer as the teacher: Llama-3.2 only)
-for m in meta-llama/Llama-3.2-1B-Instruct meta-llama/Llama-3.2-3B-Instruct; do
-  n=$(basename $m)
-  [ -f eval/kd_$n/pubmedqa/metrics.json ] || {
-    python train.py --config $CFG --set run_name=kd_$n student.pretrained=$m $P train.ce_weight=0.3
-    python evaluate.py --config $CFG --name kd_$n --model runs/kd_$n/best --reference teacher_chat; }
-done
-set +f
+bash screen_students.sh 2>&1 | tee logs/screen_students.log
 ```
 
 Summary (all students, ranked by accuracy):
@@ -359,7 +331,7 @@ import json, glob, os
 rows = []
 for f in glob.glob("eval/*/pubmedqa/metrics.json"):
     run = f.split("/")[1]
-    if not run.startswith(("zs_", "sft_", "kd_", "ce0.3_L7", "teacher_chat")):
+    if not (run.startswith("pubmedqa_") or run in ("ce0.3_L7", "teacher_chat")):
         continue
     m = json.load(open(f))
     s = f"runs/{run}/summary.json"

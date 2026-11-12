@@ -32,6 +32,7 @@ DEFAULTS = {
         "num_layers": 3,
         "layer_ids": None,                # teacher_layers: which teacher layers to keep (default: uniform)
         "pretrained": None,               # pretrained: HF id, e.g. meta-llama/Llama-3.2-1B-Instruct
+        "source": None,                   # teacher_layers / random: model to take layers from (default: the teacher)
         "freeze": ["embeddings", "lm_head"],
     },
     "train": {
