@@ -39,6 +39,7 @@ DEFAULTS = {
         "objective": "kd",                # kd | sft   (same loop; sft drops the KD term)
         "targets": "teacher",             # teacher | gold   (what the student learns to produce)
         "ce_weight": 0.2,                 # loss = (1 - ce_weight) * KD + ce_weight * CE
+        "hidden_weight": 0.0,             # > 0 adds hidden-state distillation: + hidden_weight * (1 - cos) per layer
         "temperature": 2.0,
         "divergence": "fkl",              # fkl | rkl | skl | srkl
         "skew_alpha": 0.1,                # skl / srkl only (DistiLLM default)

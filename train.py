@@ -70,9 +70,17 @@ def kd_loss(s_logits, t_logits, input_ids, loss_mask, ce_weight, temperature, di
 
 
 # ============================================================================ training
-def forward(model, batch, bf16):
+def forward(model, batch, bf16, hidden=False):
     with torch.autocast("cuda", dtype=torch.bfloat16, enabled=bf16 and torch.cuda.is_available()):
-        return model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]).logits
+        out = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"], output_hidden_states=hidden)
+    return out.logits, out.hidden_states
+
+
+def hidden_loss(s_h, t_h):
+    """Student layer j matches the teacher's output after layer round(j * N / L): 1 - cosine similarity."""
+    L, N = len(s_h) - 1, len(t_h) - 1
+    return sum(1 - F.cosine_similarity(s_h[j].float(), t_h[round(j * N / L)].float(), dim=-1).mean()
+               for j in range(1, L + 1)) / L
 
 
 @torch.no_grad()
@@ -83,9 +91,9 @@ def validate(student, teacher, val, cfg, pad_id, dev):
     ce_sum = kl_sum = n_tok = 0.0
     for i in range(0, len(val), t["batch_size"]):
         b = {k: v.to(dev) for k, v in collate(val[i:i + t["batch_size"]], pad_id).items()}
-        s = forward(student, b, t["bf16"])
+        s = forward(student, b, t["bf16"])[0]
         n = int(b["loss_mask"][:, 1:].sum())
-        tl = forward(teacher, b, t["bf16"]) if teacher is not None else None
+        tl = forward(teacher, b, t["bf16"])[0] if teacher is not None else None
         _, kl, ce = kd_loss(s, tl, b["input_ids"], b["loss_mask"], 0.0, t["temperature"], t["divergence"],
                             skew_alpha=t["skew_alpha"])
         ce_sum, kl_sum, n_tok = ce_sum + ce.item() * n, kl_sum + float(kl) * n, n_tok + n
@@ -125,7 +133,7 @@ def train_one(cfg, teacher, build_teacher, teacher_tok, dev):
     warm = int(t["warmup_ratio"] * t["max_steps"])
     sched = torch.optim.lr_scheduler.LambdaLR(opt, lambda s: (s + 1) / warm if s < warm else
                                               0.5 * (1 + math.cos(math.pi * (s - warm) / max(1, t["max_steps"] - warm))))
-    use_teacher = t["objective"] == "kd"
+    use_teacher = t["objective"] in ("kd", "hidden")
     meter = EnergyMeter(cfg["energy"]["enabled"])
     idle = meter.measure_idle(cfg["energy"]["idle_seconds"])
     gen = torch.Generator().manual_seed(cfg["seed"])
@@ -140,11 +148,16 @@ def train_one(cfg, teacher, build_teacher, teacher_tok, dev):
                 order, pos = torch.randperm(len(train), generator=gen).tolist(), 0
             b = {k: v.to(dev) for k, v in collate([train[i] for i in order[pos:pos + t["batch_size"]]], pad).items()}
             pos += t["batch_size"]
-            s = forward(student, b, t["bf16"])
+            hid = use_teacher and (t["hidden_weight"] > 0 or t["objective"] == "hidden")
+            s, s_h = forward(student, b, t["bf16"], hid)
             with torch.no_grad():
-                tl = forward(teacher, b, t["bf16"]) if use_teacher else None
+                tl, t_h = forward(teacher, b, t["bf16"], hid) if use_teacher else (None, None)
             loss, kl, ce = kd_loss(s, tl, b["input_ids"], b["loss_mask"], t["ce_weight"] if use_teacher else 1.0,
                                    t["temperature"], t["divergence"], skew_alpha=t["skew_alpha"])
+            if t["objective"] == "hidden":    # hidden-state loss only (KD and CE are still logged)
+                loss = hidden_loss(s_h, t_h)
+            elif hid:
+                loss = loss + t["hidden_weight"] * hidden_loss(s_h, t_h)
             (loss / t["grad_accum"]).backward()
         torch.nn.utils.clip_grad_norm_(params, t["max_grad_norm"])
         opt.step()
@@ -187,7 +200,7 @@ def main():
         "--layers", type=int, nargs="*", help="train one student per depth (depth sweep)"))
     dev = device_of(cfg)
     teacher_tok = load_tokenizer(cfg["teacher"])
-    kd = cfg["train"]["objective"] == "kd"
+    kd = cfg["train"]["objective"] in ("kd", "hidden")   # teacher needed on the GPU
     plain = cfg["teacher_precision"] in ("bf16", "fp16", "fp32")
     needs_weights = cfg["student"]["init"] != "pretrained"
     # KD teacher on the GPU. Students are built from float weights, so an int8/nf4 teacher (or SFT,

@@ -334,14 +334,36 @@ for f in glob.glob("eval/*/pubmedqa/metrics.json"):
     if not (run.startswith("pubmedqa_") or run in ("ce0.3_L7", "teacher_chat")):
         continue
     m = json.load(open(f))
+    g = lambda k: m[k]["mean"] if isinstance(m.get(k), dict) else m.get(k, float("nan"))
     s = f"runs/{run}/summary.json"
     params = json.load(open(s))["student"]["params_total"] / 1e9 if os.path.exists(s) else float("nan")
-    rows.append((run, params, m["acc"]["mean"], m["macro_f1"], m["fid_rougeL"]["mean"], m["fid_ppl"]["mean"]))
+    rows.append((run, params, g("acc"), g("macro_f1"), g("fid_rougeL"), g("fid_ppl")))
 print(f"{'run':40}{'params B':>9}{'acc':>7}{'F1':>7}{'fid_rL':>8}{'fid_ppl':>9}")
 for r in sorted(rows, key=lambda r: -r[2]):
-    print(f"{r[0]:40}{r[1]:9.2f}{r[2]:7.3f}{r[3]:7.3f}{r[4]:8.3f}{r[5]:9.2f}")
+    print(f"{r[0]:40}{r[1]:9.2f}{r[2]:7.3f}{r[3]:7.3f}{r[4]:8.3f}{r[5]:9.2f}".replace("nan", "  -"))
 EOF
 ```
 
 `fid_ppl` is only comparable between models with the same tokenizer. Pick the best student by acc / macro-F1
 per parameter, then benchmark its energy (section 8) and use it for the other training types.
+
+## 13. Gradual pruning (32 -> 14 -> 7) and hidden-state distillation
+
+```bash
+# stage 1: 32 -> 14 layers, CE only (teacher not loaded, so it fits in memory)
+python train.py --config $CFG --set run_name=pubmedqa_llama31-8b-p14_ce_1500st student.num_layers=14 \
+    train.objective=sft train.optimizer=adamw_8bit train.batch_size=2 train.grad_accum=16 train.max_steps=1500
+
+# stage 2: 14 -> 7 layers, KD + CE
+python train.py --config $CFG --set run_name=pubmedqa_llama31-8b-p14-p7_kd_3000st \
+    student.source=runs/pubmedqa_llama31-8b-p14_ce_1500st/best student.num_layers=7 train.ce_weight=0.3 train.max_steps=3000
+python evaluate.py --config $CFG --name pubmedqa_llama31-8b-p14-p7_kd_3000st \
+    --model runs/pubmedqa_llama31-8b-p14-p7_kd_3000st/best --reference teacher_chat
+
+# stage 2 with hidden-state distillation (each student layer matches the output of a group of teacher layers)
+python train.py --config $CFG --set run_name=pubmedqa_llama31-8b-p14-p7_kdhid_3000st \
+    student.source=runs/pubmedqa_llama31-8b-p14_ce_1500st/best student.num_layers=7 train.ce_weight=0.3 \
+    train.max_steps=3000 train.hidden_weight=1.0
+python evaluate.py --config $CFG --name pubmedqa_llama31-8b-p14-p7_kdhid_3000st \
+    --model runs/pubmedqa_llama31-8b-p14-p7_kdhid_3000st/best --reference teacher_chat
+```
