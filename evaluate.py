@@ -8,6 +8,7 @@
 
 metrics.json contains:
   acc / macro_f1 / em / f1   label or span vs gold
+  pass, pass_humaneval, pass_mbpp, code_results, fid_pass_agreement   code: pass@1 (greedy) by running the tests
   gold_*   BLEU, ROUGE-1, ROUGE-L, chrF, cosine, BERTScore vs the gold text (PubMedQA: long_answer vs the
            justification after the label)
   fid_*    the same metrics vs the reference model's answer (--reference)
@@ -51,14 +52,51 @@ def task_scores(row, pred):
     if row["task"] == "yes_no_maybe":
         m = re.search(r"\b(yes|no|maybe)\b", pred.lower())
         return {"label": m and m.group(1), "acc": float(bool(m) and m.group(1) == row["gold"])}
+    if row["task"] == "code":
+        result = run_code(row, extract_code(pred))
+        return {"pass": float(result == "pass"), "result": result}
     return {}
+
+
+def extract_code(pred):
+    """First ```python block (or any ``` block); otherwise the whole answer if it defines something."""
+    m = re.search(r"```(?:python|py)?[^\n]*\n(.*?)(?:```|$)", pred, re.S)
+    if m:
+        return m.group(1)
+    return pred if re.search(r"^\s*(def|class|import|from) ", pred, re.M) else ""
+
+
+def run_code(row, code, timeout=20):
+    """Runs setup + code + tests in a separate Python process. Returns pass / no_code / syntax_error /
+    wrong_answer (a test assertion failed) / runtime_error / timeout. Runs model-written code: use a VM."""
+    import ast
+    import subprocess
+    import sys
+    import tempfile
+    if not code.strip():
+        return "no_code"
+    program = f"{row.get('setup', '')}\n{code}\n\n{row['tests']}"
+    try:
+        ast.parse(program)
+    except SyntaxError:
+        return "syntax_error"
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "prog.py")
+        open(path, "w").write(program)
+        try:
+            r = subprocess.run([sys.executable, path], cwd=d, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return "timeout"
+    if r.returncode == 0:
+        return "pass"
+    return "wrong_answer" if "AssertionError" in r.stderr else "runtime_error"
 
 
 def reference_text(row):
     """Gold free text for the text metrics (None for span tasks)."""
     if row["task"] == "yes_no_maybe":
         return row.get("long_answer") or None
-    if row["task"] in ("continuation", "generic") and row.get("gold"):
+    if row["task"] in ("continuation", "generic", "code") and row.get("gold"):
         return row["gold"] if isinstance(row["gold"], str) else row["gold"][0]
     return None
 
@@ -174,6 +212,20 @@ Candidate answer:
 Return only JSON: {{"score": <integer 0-10>}}"""
 
 
+JUDGE_PROMPT_NO_REFERENCE = """You are grading an answer to an open question. There is no reference answer.
+Rate the answer from 0 to 10 for factual correctness, completeness and clarity:
+10 = correct, complete and clear, 7-9 = correct with minor gaps, 4-6 = partly correct or vague,
+1-3 = mostly wrong or off-topic, 0 = wrong, empty or unrelated. Ignore length and style.
+
+Question:
+{prompt}
+
+Answer:
+{candidate}
+
+Return only JSON: {{"score": <integer 0-10>}}"""
+
+
 def call_judge(provider, prompt):
     """provider = 'openai:<model>' (OPENAI_API_KEY) or 'gemini:<model>' (GEMINI_API_KEY)."""
     kind, model = provider.split(":", 1)
@@ -200,8 +252,9 @@ def run_judge(rows, preds, provider, n, cache_path, call=call_judge):
             ref = r["gold"] if isinstance(r["gold"], str) else ", ".join(r["gold"] or [])
             if r.get("long_answer"):
                 ref = f"{ref}. {r['long_answer']}"
-            cache[r["id"]] = call(provider, JUDGE_PROMPT.format(prompt=r["prompt"], reference=ref,
-                                                                candidate=by_id[r["id"]]))
+            prompt = (JUDGE_PROMPT.format(prompt=r["prompt"], reference=ref, candidate=by_id[r["id"]]) if ref else
+                      JUDGE_PROMPT_NO_REFERENCE.format(prompt=r["prompt"], candidate=by_id[r["id"]]))
+            cache[r["id"]] = call(provider, prompt)
             json.dump(cache, open(cache_path, "w"))
     return {i: cache[i] for i in subset}
 
@@ -248,13 +301,22 @@ def main():
                                 cfg["max_prompt_tokens"], chat=args.chat_template)
             energy = meter.stop()
 
+        from concurrent.futures import ThreadPoolExecutor   # parallel, because code tests run as subprocesses
+        with ThreadPoolExecutor(8) as pool:
+            scores = list(pool.map(task_scores, rows, [o["text"] for o in outs]))
         preds = [{"id": r["id"], "prediction": o["text"], "n_new_tokens": o["n_new_tokens"], "stopped": o["stopped"],
-                  **task_scores(r, o["text"])} for r, o in zip(rows, outs)]
+                  **sc} for r, o, sc in zip(rows, outs, scores)]
         metrics = {"model": args.model, "precision": args.precision, "n": len(preds), "reference": args.reference,
                    "max_new_tokens": cfg["max_new_tokens"], "generation_energy": energy}
-        for k in ("em", "f1", "acc"):
+        for k in ("em", "f1", "acc", "pass"):
             if k in preds[0]:
                 metrics[k] = ci([p[k] for p in preds])
+        if rows[0]["task"] == "code":   # pass@1 per benchmark and why the rest failed
+            for bench, prefix in (("humaneval", "code-HumanEval/"), ("mbpp", "code-mbpp-")):
+                sub = [p["pass"] for p in preds if p["id"].startswith(prefix)]
+                metrics[f"pass_{bench}"] = float(np.mean(sub)) if sub else None
+            results = collections.Counter(p["result"] for p in preds)
+            metrics["code_results"] = {k: v / len(preds) for k, v in sorted(results.items())}
         if rows[0]["task"] == "yes_no_maybe":
             f1s = []
             for lab in ("yes", "no", "maybe"):
@@ -268,13 +330,17 @@ def main():
             add_text_scores(preds, idx, [answer_body(rows[i], preds[i]["prediction"]) for i in idx],
                             [reference_text(rows[i]) for i in idx], "gold", args, metrics)
         if args.reference:
-            refs = {p["id"]: p["prediction"] for p in read_jsonl(f"{args.out}/{args.reference}/{ds}/predictions.jsonl")}
+            ref_preds = {p["id"]: p for p in read_jsonl(f"{args.out}/{args.reference}/{ds}/predictions.jsonl")}
+            refs = {i: p["prediction"] for i, p in ref_preds.items()}
+            if "pass" in preds[0]:   # does the student solve the same problems as the reference model?
+                metrics["fid_pass_agreement"] = float(np.mean([p["pass"] == ref_preds[p["id"]].get("pass") for p in preds]))
             add_text_scores(preds, list(range(len(rows))), [p["prediction"] for p in preds],
                             [refs[r["id"]] for r in rows], "fid", args, metrics)
         if model is not None and not args.no_ppl:
             gold_rows = [r for r in rows if ppl_reference(r)]
-            add_ppl_scores(model, tok, [r["prompt"] for r in gold_rows], [ppl_reference(r) for r in gold_rows],
-                           "gold", cfg, metrics)
+            if gold_rows:
+                add_ppl_scores(model, tok, [r["prompt"] for r in gold_rows], [ppl_reference(r) for r in gold_rows],
+                               "gold", cfg, metrics)
             if args.reference:
                 add_ppl_scores(model, tok, [r["prompt"] for r in rows], [refs[r["id"]] for r in rows], "fid", cfg, metrics)
         for provider in args.judge:
@@ -294,7 +360,7 @@ def main():
                               "mean_new_tokens": float(np.mean([p["n_new_tokens"] for p in preds]))}
         write_jsonl(preds, f"{out_dir}/predictions.jsonl")
         write_json(metrics, f"{out_dir}/metrics.json")
-        shown = [k for k in ("acc", "macro_f1", "f1", "gold_rougeL", "gold_bertscore", "fid_rougeL", "gold_ppl", "fid_ppl")
+        shown = [k for k in ("pass", "pass_humaneval", "pass_mbpp", "fid_pass_agreement", "acc", "macro_f1", "f1", "gold_rougeL", "gold_bertscore", "fid_rougeL", "gold_ppl", "fid_ppl")
                  if k in metrics]
         print(f"{args.name} / {ds}: n={len(preds)}, " + ", ".join(
             f"{k}={metrics[k]['mean'] if isinstance(metrics[k], dict) else metrics[k]:.3f}" for k in shown))

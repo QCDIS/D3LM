@@ -1,0 +1,23 @@
+# Python code generation: Qwen2.5-Coder-7B-Instruct teacher, 7 of its 28 layers as the student.
+# Train/validation prompts: self-oss-instruct (teacher answers with its chat template); test: HumanEval+ and MBPP+.
+base: base.yaml
+teacher: Qwen/Qwen2.5-Coder-7B-Instruct
+teacher_tag: qwen25-coder-7b-it-chat
+teacher_chat_template: true
+datasets: [code]
+max_prompt_tokens: 768
+max_new_tokens: 512              # code answers are long; truncated answers are dropped from training
+student:
+  init: teacher_layers
+  num_layers: 7
+  layer_ids: null
+  freeze: [embeddings, lm_head]
+train:
+  lr: 5.0e-5
+  ce_weight: 0.3
+  optimizer: adamw_8bit
+  gradient_checkpointing: true
+  drop_truncated: true
+  batch_size: 2
+  grad_accum: 16
+  max_steps: 3000

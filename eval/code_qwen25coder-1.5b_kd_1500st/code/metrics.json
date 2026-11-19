@@ -1,0 +1,66 @@
+{
+  "model": "runs/code_qwen25coder-1.5b_kd_1500st/best",
+  "precision": "bf16",
+  "n": 542,
+  "reference": "code_teacher",
+  "max_new_tokens": 512,
+  "generation_energy": {
+    "seconds": 138.65190885588527,
+    "mode": "counter",
+    "energy_j": 23358.708999991417,
+    "kwh": 0.006488530277775394
+  },
+  "pass": {
+    "mean": 0.3634686346863469,
+    "lo": 0.3247232472324723,
+    "hi": 0.4059040590405904,
+    "n": 542
+  },
+  "pass_humaneval": 0.0,
+  "pass_mbpp": 0.5211640211640212,
+  "code_results": {
+    "no_code": 0.33948339483394835,
+    "pass": 0.3634686346863469,
+    "runtime_error": 0.03505535055350553,
+    "syntax_error": 0.014760147601476014,
+    "timeout": 0.0036900369003690036,
+    "wrong_answer": 0.24354243542435425
+  },
+  "gold_chrf": {
+    "mean": 0.2544769540423407,
+    "lo": 0.23744886865809273,
+    "hi": 0.2725425724234565,
+    "n": 542
+  },
+  "gold_floor_shuffled": {
+    "chrf": 0.10197180929553071
+  },
+  "fid_pass_agreement": 0.5479704797047971,
+  "fid_chrf": {
+    "mean": 0.39431796086213566,
+    "lo": 0.3700090859025847,
+    "hi": 0.4203129602322318,
+    "n": 542
+  },
+  "fid_floor_shuffled": {
+    "chrf": 0.15351142408846008
+  },
+  "gold_ppl": {
+    "mean": 1.737726822385862
+  },
+  "gold_bpc": {
+    "mean": 0.25214192830719884
+  },
+  "fid_ppl": {
+    "mean": 1.279840684660057
+  },
+  "fid_bpc": {
+    "mean": 0.10225605759904594
+  },
+  "failure": {
+    "empty_rate": 0.2896678966789668,
+    "stop_rate": 1.0,
+    "degenerate_rate": 0.0,
+    "mean_new_tokens": 72.13468634686348
+  }
+}

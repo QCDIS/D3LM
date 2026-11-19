@@ -1,0 +1,48 @@
+{
+  "model": "Qwen/Qwen2.5-Coder-7B-Instruct",
+  "precision": "bf16",
+  "n": 542,
+  "reference": null,
+  "max_new_tokens": 512,
+  "generation_energy": {
+    "seconds": 298.5558052598499,
+    "mode": "counter",
+    "energy_j": 80461.89899998903,
+    "kwh": 0.022350527499996952
+  },
+  "pass": {
+    "mean": 0.7380073800738007,
+    "lo": 0.7029520295202952,
+    "hi": 0.7749538745387454,
+    "n": 542
+  },
+  "pass_humaneval": 0.823170731707317,
+  "pass_mbpp": 0.701058201058201,
+  "code_results": {
+    "pass": 0.7380073800738007,
+    "runtime_error": 0.03136531365313653,
+    "timeout": 0.01107011070110701,
+    "wrong_answer": 0.21955719557195572
+  },
+  "gold_chrf": {
+    "mean": 0.47288718805238017,
+    "lo": 0.45572612097202403,
+    "hi": 0.4905548838103064,
+    "n": 542
+  },
+  "gold_floor_shuffled": {
+    "chrf": 0.15423293426635992
+  },
+  "gold_ppl": {
+    "mean": 1.660560828690947
+  },
+  "gold_bpc": {
+    "mean": 0.23141561392744736
+  },
+  "failure": {
+    "empty_rate": 0.0,
+    "stop_rate": 1.0,
+    "degenerate_rate": 0.0,
+    "mean_new_tokens": 115.64575645756457
+  }
+}

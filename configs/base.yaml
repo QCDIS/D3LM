@@ -3,7 +3,7 @@
 
 teacher: meta-llama/Llama-3.1-8B-Instruct
 teacher_precision: bf16          # bf16 | fp16 | fp32 | int8 | nf4
-datasets: [pubmedqa]             # wikitext2 | squad | pubmedqa | sciq | jsonl:/path/to/own.jsonl
+datasets: [pubmedqa]             # wikitext2 | squad | pubmedqa | jsonl:/path/to/own.jsonl
 splits_dir: data/splits
 targets_dir: data/teacher
 train_size: 20000
@@ -15,19 +15,24 @@ output_dir: runs
 seed: 1
 
 student:
-  init: teacher_layers                   # random (D3LM) | teacher_layers (pruned teacher) | pretrained
+  init: teacher_layers           # random (D3LM) | teacher_layers (pruned teacher) | pretrained
   num_layers: 10
   layer_ids: null                # teacher_layers only, e.g. [0, 8, 16, 24, 31]; default: evenly spaced
   pretrained: null               # pretrained only, e.g. meta-llama/Llama-3.2-1B-Instruct
-  freeze: [embeddings, lm_head]  # copied from the teacher and kept --> fixed reeze: [embeddings, lm_head]
+  source: null                   # teacher_layers: other model to take layers from (default: the teacher)
+  freeze: [embeddings, lm_head]  # copied from the teacher and kept fixed
 
 train:
-  objective: kd                  # kd | sft (same loop, KD term removed)
+  objective: kd                  # kd | sft (CE only) | hidden (hidden-state loss only)
   targets: teacher               # teacher | gold
   ce_weight: 0.2                 # loss = (1 - ce_weight) * KD + ce_weight * CE
+  hidden_weight: 0.0             # > 0 adds hidden-state distillation (KD mode)
   temperature: 2.0
-  divergence: fkl                # fkl (forward KL) | rkl (reverse KL)
+  divergence: fkl                # fkl (forward KL) | rkl (reverse KL) | skl / srkl (skew KL, DistiLLM)
+  skew_alpha: 0.1                # skl / srkl only
   lr: 3.0e-5                     # use ~2e-5 for pretrained students
+  optimizer: adamw               # adamw | adamw_8bit
+  gradient_checkpointing: false  # true = less activation memory, ~30% slower
   batch_size: 4
   grad_accum: 8                  # 32 sequences per optimizer step
   max_steps: 1500

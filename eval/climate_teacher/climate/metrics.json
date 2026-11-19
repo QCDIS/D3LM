@@ -1,0 +1,19 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "precision": "bf16",
+  "n": 638,
+  "reference": null,
+  "max_new_tokens": 512,
+  "generation_energy": {
+    "seconds": 346.3647241469007,
+    "mode": "counter",
+    "energy_j": 90578.87299999595,
+    "kwh": 0.02516079805555443
+  },
+  "failure": {
+    "empty_rate": 0.0,
+    "stop_rate": 1.0,
+    "degenerate_rate": 0.0,
+    "mean_new_tokens": 230.7460815047022
+  }
+}

@@ -17,7 +17,7 @@ import time
 import torch
 import torch.nn.functional as F
 
-from common import (EnergyMeter, build_student, collate, device_of, encode, load_model, load_tokenizer,
+from common import (EnergyMeter, add_stitches, build_student, save_stitches, collate, device_of, encode, load_model, load_tokenizer,
                     parse_args, set_seed, teacher_tag, training_rows, write_json)
 
 
@@ -114,7 +114,13 @@ def train_one(cfg, teacher, build_teacher, teacher_tok, dev):
     write_json(cfg, os.path.join(run_dir, "config.json"))
 
     student, tok, info = build_student(cfg, build_teacher, teacher_tok)
-    student.to(dev).train()
+    student.to(dev)
+    stitched = bool(t["stitch_rank"]) and "teacher_layer_ids" in info
+    if stitched:   # healing layers where layers were removed (a gap between two kept teacher layers)
+        ids = info["teacher_layer_ids"]
+        info["stitch_positions"] = [j for j in range(1, len(ids)) if ids[j] - ids[j - 1] > 1]
+        add_stitches(student, info["stitch_positions"], t["stitch_rank"])
+    student.train()
     if t.get("gradient_checkpointing"):   # recompute activations in the backward pass: less memory, ~30% slower
         student.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         student.config.use_cache = False
@@ -125,6 +131,10 @@ def train_one(cfg, teacher, build_teacher, teacher_tok, dev):
     train, val = enc(training_rows(cfg, "train")), enc(training_rows(cfg, "validation"))
 
     params = [p for p in student.parameters() if p.requires_grad]
+    main = [p for n, p in student.named_parameters() if p.requires_grad and ".stitch." not in n]
+    if stitched and t["stitch_steps"]:   # phase 1: only the healing layers learn
+        for p in main:
+            p.requires_grad_(False)
     if t.get("optimizer", "adamw") == "adamw_8bit":   # 8-bit optimizer state: ~2 bytes/param instead of 8
         import bitsandbytes as bnb
         opt = bnb.optim.AdamW8bit(params, lr=float(t["lr"]))
@@ -164,6 +174,10 @@ def train_one(cfg, teacher, build_teacher, teacher_tok, dev):
         sched.step()
         opt.zero_grad(set_to_none=True)
         step += 1
+        if stitched and step == t["stitch_steps"]:   # phase 2: the whole student learns
+            for p in main:
+                p.requires_grad_(True)
+            print(f"[{name}] step {step}: healing phase done, training all layers")
         if step % 10 == 0 or step == 1:
             log.write(f'{{"step": {step}, "loss": {loss.item():.4f}, "kl": {float(kl):.4f}, "ce": {ce.item():.4f}, '
                       f'"lr": {sched.get_last_lr()[0]:.2e}, "elapsed_s": {time.time() - t0:.0f}}}\n')
@@ -175,6 +189,8 @@ def train_one(cfg, teacher, build_teacher, teacher_tok, dev):
             if ev["val_ce"] < best:
                 best, best_step, bad = ev["val_ce"], step, 0
                 student.save_pretrained(os.path.join(run_dir, "best"))
+                if stitched:
+                    save_stitches(student, os.path.join(run_dir, "best", "stitches.pt"))
                 tok.save_pretrained(os.path.join(run_dir, "best"))
             else:
                 bad += 1

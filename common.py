@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import time
 
 import numpy as np
@@ -34,11 +35,14 @@ DEFAULTS = {
         "pretrained": None,               # pretrained: HF id, e.g. meta-llama/Llama-3.2-1B-Instruct
         "source": None,                   # teacher_layers / random: model to take layers from (default: the teacher)
         "freeze": ["embeddings", "lm_head"],
+        "train_layers": None,             # e.g. [2,5]: only these student layers learn, everything else is frozen
     },
     "train": {
-        "objective": "kd",                # kd | sft   (same loop; sft drops the KD term)
+        "objective": "kd",                # kd | sft (CE only) | hidden (hidden-state loss only)
         "targets": "teacher",             # teacher | gold   (what the student learns to produce)
         "ce_weight": 0.2,                 # loss = (1 - ce_weight) * KD + ce_weight * CE
+        "stitch_rank": 0,                 # > 0: low-rank "healing" layer at every seam where teacher layers were removed
+        "stitch_steps": 0,                # first N steps train only the healing layers (0 = train everything together)
         "hidden_weight": 0.0,             # > 0 adds hidden-state distillation: + hidden_weight * (1 - cos) per layer
         "temperature": 2.0,
         "divergence": "fkl",              # fkl | rkl | skl | srkl
@@ -203,6 +207,64 @@ def _pubmedqa(split):
     return rows
 
 
+CODE_INSTRUCTION = ("Write a correct, self-contained Python solution. "
+                    "Return only the code, in a single ```python code block.\n\n")
+
+
+def _code(split):
+    """Python code generation.
+    train/validation: instructions from bigcode/self-oss-instruct-sc2-exec-filter-50k (the teacher writes the answers);
+    test: HumanEval+ (164) and MBPP+ (378) from EvalPlus, scored by running their tests (pass@1).
+    `setup` (imports) + the model's code + `tests` is the program that is executed."""
+    rows = []
+    if split != "test":
+        for r in _hf("bigcode/self-oss-instruct-sc2-exec-filter-50k", split="train"):
+            gid = str(r["id"])
+            if (_rank(gid) % 50 == 0) != (split == "validation"):
+                continue
+            rows.append({"id": f"code-oss-{gid}", "dataset": "code", "task": "code",
+                         "prompt": CODE_INSTRUCTION + r["instruction"], "gold": r["response"], "group": gid})
+        return rows
+    for r in _hf("evalplus/humanevalplus", split="test"):
+        setup = "\n".join(l for l in r["prompt"].splitlines() if l.startswith(("import ", "from ")))
+        rows.append({"id": f"code-{r['task_id']}", "dataset": "code", "task": "code",
+                     "prompt": CODE_INSTRUCTION + "Complete this function:\n```python\n" + r["prompt"] + "```\n"
+                               "Write the complete function, including its signature.",
+                     "gold": r["prompt"] + r["canonical_solution"], "setup": setup,
+                     "tests": r["test"] + f"\ncheck({r['entry_point']})\n", "group": r["task_id"]})
+    for r in _hf("evalplus/mbppplus", split="test"):
+        rows.append({"id": f"code-mbpp-{r['task_id']}", "dataset": "code", "task": "code",
+                     "prompt": CODE_INSTRUCTION + r["prompt"] + "\nYour code should pass this test:\n" + r["test_list"][0],
+                     "gold": r["code"], "setup": "\n".join(r["test_imports"]), "tests": r["test"],
+                     "group": f"mbpp-{r['task_id']}"})
+    return rows
+
+
+CLIMATE_WORDS = re.compile(
+    r"\b(climate|emission|carbon|co2|greenhouse|global warming|renewable|solar|wind power|pollution|biodiversity|"
+    r"deforestation|sustainab\w*|ocean acidification|sea level|fossil fuel|recycling|environment\w*)\b", re.I)
+
+
+def _climate(split, words=200, name="climate"):
+    """Open climate/environment questions, no answers: the climate subset of Researchy Questions (real Bing queries,
+    corbyrosset/researchy_questions, both of its splits) found by keywords. 10% test, 5% validation, rest train,
+    by a hash of the question. Students are scored against the teacher (fid_*) and, optionally, an LLM judge.
+    climate_long: the same questions and splits, answers of up to 300 words (for the short-vs-long comparison)."""
+    rows = []
+    for hf_split in ("train", "test"):
+        for r in _hf("corbyrosset/researchy_questions", split=hf_split):
+            q = r["question"].strip()
+            if not CLIMATE_WORDS.search(q):
+                continue
+            k = _rank(q.lower()) % 20
+            if {"test": k < 2, "validation": k == 2, "train": k > 2}[split]:
+                rows.append({"id": f"climate-{text_hash(q)}", "dataset": name, "task": "freeform",
+                             "prompt": (f"Answer the question clearly and accurately in at most {words} words.\n\n"
+                                        f"Question: {q}\nAnswer:"),
+                             "gold": None, "group": text_hash(q)})
+    return rows
+
+
 def _jsonl(path, split):
     """Own dataset: lines {"prompt", "gold"?, "task"?, "split"?, "group"?}."""
     name = os.path.basename(path).split(".")[0]
@@ -223,7 +285,8 @@ def dataset_name(spec):
 def dataset_pool(spec, split):
     if spec.startswith("jsonl:"):
         return _jsonl(spec[6:], split)
-    return {"wikitext2": _wikitext2, "squad": _squad, "pubmedqa": _pubmedqa}[spec](split)
+    return {"wikitext2": _wikitext2, "squad": _squad, "pubmedqa": _pubmedqa, "code": _code, "climate": _climate,
+            "climate_long": lambda s: _climate(s, words=300, name="climate_long")}[spec](split)
 
 
 # =============================================================================== splits
@@ -325,7 +388,53 @@ def load_model(name, precision="bf16", device="cuda"):
             load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.bfloat16))
     else:  # already-quantised checkpoint (AWQ / GPTQ)
         model = AutoModelForCausalLM.from_pretrained(name, device_map={"": 0}, **_dtype_kw("auto"))
+    if os.path.exists(os.path.join(str(name), "stitches.pt")):   # student trained with healing layers
+        load_stitches(model, os.path.join(str(name), "stitches.pt"))
     return model.eval()
+
+
+# ========================================================================== stitching
+class Stitch(torch.nn.Module):
+    """Low-rank "healing" layer at a seam: h -> h + up(down(h)). `up` starts at zero, so the model is unchanged
+    at the start and the layer only learns the correction the next layer needs after the removed ones."""
+    def __init__(self, dim, rank):
+        super().__init__()
+        self.down = torch.nn.Linear(dim, rank, bias=False)
+        self.up = torch.nn.Linear(rank, dim, bias=False)
+        torch.nn.init.zeros_(self.up.weight)
+
+    def forward(self, h):
+        return h + self.up(self.down(h))
+
+
+def _stitch_hook(layer, args, kwargs):
+    if args:
+        return (layer.stitch(args[0]),) + tuple(args[1:]), kwargs
+    kwargs["hidden_states"] = layer.stitch(kwargs["hidden_states"])
+    return args, kwargs
+
+
+def add_stitches(model, positions, rank):
+    """Put a healing layer in front of each student layer in `positions` (the layers that follow a removed block)."""
+    p = next(model.parameters())
+    for j in positions:
+        layer = model.model.layers[j]
+        layer.stitch = Stitch(model.config.hidden_size, rank).to(device=p.device, dtype=p.dtype)
+        layer.register_forward_pre_hook(_stitch_hook, with_kwargs=True)
+
+
+def save_stitches(model, path):
+    layers = model.model.layers
+    pos = [j for j in range(len(layers)) if hasattr(layers[j], "stitch")]
+    torch.save({"positions": pos, "rank": layers[pos[0]].stitch.down.out_features,
+                "state": {j: {k: v.cpu() for k, v in layers[j].stitch.state_dict().items()} for j in pos}}, path)
+
+
+def load_stitches(model, path):
+    d = torch.load(path, map_location="cpu")
+    add_stitches(model, d["positions"], d["rank"])
+    for j in d["positions"]:
+        model.model.layers[j].stitch.load_state_dict(d["state"][j])
 
 
 def build_student(cfg, teacher, teacher_tok):
@@ -342,7 +451,7 @@ def build_student(cfg, teacher, teacher_tok):
     if s["init"] == "pretrained":
         student = AutoModelForCausalLM.from_pretrained(s["pretrained"], **_dtype_kw(torch.float32))
         tok = load_tokenizer(s["pretrained"])
-        if cfg["train"]["objective"] == "kd" and tok.get_vocab() != teacher_tok.get_vocab():
+        if cfg["train"]["objective"] in ("kd", "hidden") and tok.get_vocab() != teacher_tok.get_vocab():
             raise ValueError("Student and teacher tokenizers differ: use train.objective=sft")
     else:
         L = s["num_layers"]
@@ -375,6 +484,10 @@ def build_student(cfg, teacher, teacher_tok):
         student.get_input_embeddings().weight.requires_grad_(False)
     if "lm_head" in s["freeze"]:
         student.get_output_embeddings().weight.requires_grad_(False)
+    if s.get("train_layers") is not None:
+        student.requires_grad_(False)
+        for j in s["train_layers"]:
+            student.model.layers[j].requires_grad_(True)
     params = {id(p): p for p in student.parameters()}.values()
     emb = student.get_input_embeddings().weight.numel()
     tied = student.get_output_embeddings().weight is student.get_input_embeddings().weight

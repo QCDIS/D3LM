@@ -1,0 +1,23 @@
+# Open climate/environment questions without answers (climate subset of Researchy Questions).
+# Teacher Llama-3.1-8B-Instruct (as PubMedQA); students are scored against the teacher (fid_*) and an LLM judge.
+base: base.yaml
+teacher: meta-llama/Llama-3.1-8B-Instruct
+teacher_tag: llama31-8b-it-chat
+teacher_chat_template: true
+datasets: [climate]
+max_prompt_tokens: 128
+max_new_tokens: 512              # "at most 200 words" is about 270 tokens; truncated answers are dropped from training
+student:
+  init: teacher_layers
+  num_layers: 7
+  layer_ids: null
+  freeze: [embeddings, lm_head]
+train:
+  lr: 5.0e-5
+  ce_weight: 0.3
+  optimizer: adamw_8bit
+  gradient_checkpointing: true
+  drop_truncated: true
+  batch_size: 2
+  grad_accum: 16
+  max_steps: 3000
