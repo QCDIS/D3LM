@@ -174,7 +174,7 @@ def train_one(cfg, teacher, build_teacher, teacher_tok, dev):
         sched.step()
         opt.zero_grad(set_to_none=True)
         step += 1
-        if stitched and step == t["stitch_steps"]:   # phase 2: the whole student learns
+        if stitched and step == t["stitch_steps"] < t["max_steps"]:   # phase 2: the whole student learns
             for p in main:
                 p.requires_grad_(True)
             print(f"[{name}] step {step}: healing phase done, training all layers")
@@ -183,6 +183,8 @@ def train_one(cfg, teacher, build_teacher, teacher_tok, dev):
                       f'"lr": {sched.get_last_lr()[0]:.2e}, "elapsed_s": {time.time() - t0:.0f}}}\n')
             log.flush()
         if step % t["eval_every"] == 0 or step == t["max_steps"]:
+            s = s_h = tl = t_h = loss = None      # free the last training batch's logits before validating
+            torch.cuda.empty_cache()
             ev = {"step": step, **validate(student, teacher if use_teacher else None, val, cfg, pad, dev)}
             history.append(ev)
             print(f"[{name}] {ev}")

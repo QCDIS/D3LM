@@ -1,0 +1,10 @@
+# PubMedQA with ALL of PQA-A for training (~207k questions instead of 20k). Same test set (PQA-L, 1,000) and the same
+# 500 validation questions as pubmedqa_llama_L7_chat.yaml; separate folders, so the 20k data is untouched.
+base: pubmedqa_llama_L7_chat.yaml
+splits_dir: data/splits_full
+targets_dir: data/teacher_full
+train_size: 0                    # 0 = no limit: every PQA-A question not in validation/test
+train:
+  max_steps: 6500                # about 1 epoch of ~207k at batch 32
+  eval_every: 500
+  patience: 5
