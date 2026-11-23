@@ -2,6 +2,7 @@
 
     python print_results.py              # all datasets
     python print_results.py climate      # one dataset
+    python print_results.py --all        # also the superseded 20k-data PubMedQA runs (pubmedqa_*_1500st/_3000st)
 """
 import glob
 import json
@@ -13,7 +14,8 @@ KEYS = {"pubmedqa": ["acc", "macro_f1", "fid_rougeL", "fid_ppl"],
         "code": ["pass", "pass_humaneval", "pass_mbpp", "fid_pass_agreement"]}
 TEACHER = {"pubmedqa": "teacher_chat", "climate": "climate_teacher", "code": "code_teacher"}
 
-for ds in sys.argv[1:] or KEYS:
+show_all = "--all" in sys.argv
+for ds in [a for a in sys.argv[1:] if a != "--all"] or KEYS:
     keys = KEYS[ds]
     print(f"\n=== {ds}")
     print(f"{'run':46}" + "".join(f"{k[:13]:>14}" for k in keys) + f"{'best/steps':>12}{'hours':>7}")
@@ -21,6 +23,8 @@ for ds in sys.argv[1:] or KEYS:
         run = f.split("/")[1]
         if not (run == TEACHER[ds] or run.endswith(("_1500st", "_6500st", "_zs", "_int8", "_nf4"))):
             continue
+        if ds == "pubmedqa" and run.startswith("pubmedqa_") and run.endswith("st") and not show_all:
+            continue      # trained on the 20k subset: superseded by the full-data runs (pubmedqa-full_*)
         m = json.load(open(f))
         g = lambda k: m[k]["mean"] if isinstance(m.get(k), dict) else m.get(k, float("nan"))
         st, h = "-", float("nan")
