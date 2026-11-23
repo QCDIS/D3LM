@@ -24,7 +24,7 @@ logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
 # dataset: metric shown, its axis label, teacher answers manifest (for the data-generation energy)
 DATASETS = {
-    "pubmedqa": ("acc", "Accuracy (%)", "data/teacher/llama31-8b-it-chat/manifest.json"),
+    "pubmedqa": ("acc", "Accuracy (%)", "data/teacher_full/llama31-8b-it-chat/manifest.json"),   # full PQA-A
     "climate": ("fid_bertscore", "BERTScore vs. teacher (%)", "data/teacher/llama31-8b-it-chat/manifest.json"),
     "code": ("pass", "pass@1 (%)", "data/teacher/qwen25-coder-7b-it-chat/manifest.json"),
 }
@@ -35,12 +35,10 @@ ROWS = {
         ("Teacher, Llama-3.1-8B (BF16)", "teacher_chat", "bench/teacher.json", None, "teacher"),
         ("Teacher, INT8", "pubmedqa_llama31-8b_int8", "bench/teacher_int8.json", None, "int8"),
         ("Teacher, NF4", "pubmedqa_llama31-8b_nf4", "bench/teacher_nf4.json", None, "nf4"),
-        # pruned models at 3000 steps (same budget for both); gradual = 32 -> 14 -> 7 layers;
+        # trained on the full PQA-A set (~207k teacher answers), 6500 steps; gradual = 32 -> 14 -> 7 layers;
         # bench/student.json = a 7-layer model (section 8)
-        ("Pruned to 7 layers, gradual", "pubmedqa_llama31-8b-p14-p7_kd_3000st", "bench/student.json",
-         ["pubmedqa_llama31-8b-p14_ce_1500st", "pubmedqa_llama31-8b-p14-p7_kd_3000st"], "prune"),
-        ("Pruned to 7 layers, one step", "pubmedqa_llama31-8b-p7_kdhid_3000st", "bench/student.json",
-         "pubmedqa_llama31-8b-p7_kdhid_3000st", "prune2"),
+        ("Pruned to 7 layers, gradual", "pubmedqa-full_llama31-8b-p14-p7_kd_6500st", "bench/student.json",
+         ["pubmedqa-full_llama31-8b-p14_ce_6500st", "pubmedqa-full_llama31-8b-p14-p7_kd_6500st"], "prune"),
     ],
     "climate": [
         ("Teacher, Llama-3.1-8B (BF16)", None, "bench/climate_teacher.json", None, "teacher"),

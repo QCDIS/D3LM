@@ -1,0 +1,66 @@
+{
+  "model": "runs/code_gemma3-1b_sft_1500st/best",
+  "precision": "bf16",
+  "n": 542,
+  "reference": "code_teacher",
+  "max_new_tokens": 512,
+  "generation_energy": {
+    "seconds": 304.32429149816744,
+    "mode": "counter",
+    "energy_j": 37549.435000002384,
+    "kwh": 0.010430398611111773
+  },
+  "pass": {
+    "mean": 0.3118081180811808,
+    "lo": 0.2730166051660517,
+    "hi": 0.35239852398523985,
+    "n": 542
+  },
+  "pass_humaneval": 0.25,
+  "pass_mbpp": 0.3386243386243386,
+  "code_results": {
+    "no_code": 0.0018450184501845018,
+    "pass": 0.3118081180811808,
+    "runtime_error": 0.12177121771217712,
+    "syntax_error": 0.02029520295202952,
+    "timeout": 0.0036900369003690036,
+    "wrong_answer": 0.540590405904059
+  },
+  "gold_chrf": {
+    "mean": 0.5169413859743125,
+    "lo": 0.49630342573189495,
+    "hi": 0.53552273555933,
+    "n": 542
+  },
+  "gold_floor_shuffled": {
+    "chrf": 0.14682696999211667
+  },
+  "fid_pass_agreement": 0.5166051660516605,
+  "fid_chrf": {
+    "mean": 0.5305940360924101,
+    "lo": 0.5122730787586354,
+    "hi": 0.5491912461401985,
+    "n": 542
+  },
+  "fid_floor_shuffled": {
+    "chrf": 0.2055822794529422
+  },
+  "gold_ppl": {
+    "mean": 2.1268351704824098
+  },
+  "gold_bpc": {
+    "mean": 0.39412473518295527
+  },
+  "fid_ppl": {
+    "mean": 1.4563964242624037
+  },
+  "fid_bpc": {
+    "mean": 0.17438802178358345
+  },
+  "failure": {
+    "empty_rate": 0.0,
+    "stop_rate": 0.985239852398524,
+    "degenerate_rate": 0.0018450184501845018,
+    "mean_new_tokens": 138.87638376383765
+  }
+}
